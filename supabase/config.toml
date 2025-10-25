@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.deploy-to-netlify]
 verify_jwt = false
+
+[functions.deploy-to-netlify.env]
+NETLIFY_ACCESS_TOKEN = "nfp_R7KjQ2qSS3YAMR3qq8dgb8qkB4pEvX3F649b"
