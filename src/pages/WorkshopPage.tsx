@@ -7,6 +7,7 @@ import { TypingAnimation } from '../components/TypingAnimation';
 import { CodeTypingAnimation } from '../components/CodeTypingAnimation';
 import { supabase } from '@/integrations/supabase/client';
 import { parseAIResponse, createFileTree } from '../utils/codeParser';
+import { toast } from '@/hooks/use-toast';
 
 interface AIMessage {
   role: 'user' | 'assistant' | 'system';
@@ -70,6 +71,8 @@ export function WorkshopPage() {
   const [viewportSize, setViewportSize] = useState<ViewportSize>('desktop');
   const [refreshKey, setRefreshKey] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [deploymentUrl, setDeploymentUrl] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasProcessedInitialMessage = useRef(false);
   const projectName = "My AI Project";
@@ -476,6 +479,82 @@ export function WorkshopPage() {
     }
   };
 
+  const handlePublish = async () => {
+    if (!previewCode) {
+      toast({
+        title: "No Code to Deploy",
+        description: "Generate an app first before publishing.",
+        variant: "destructive"
+      });
+      setTerminalOutput(prev => [...prev, '❌ No code to deploy. Generate an app first.']);
+      return;
+    }
+
+    setIsDeploying(true);
+    setTerminalOutput(prev => [...prev, '🚀 Starting deployment to Netlify...']);
+    
+    toast({
+      title: "Deploying...",
+      description: "Your app is being deployed to Netlify"
+    });
+
+    try {
+      const { data, error } = await supabase.functions.invoke('deploy-to-netlify', {
+        body: { 
+          htmlContent: previewCode,
+          siteName: `astra-app-${Date.now()}`
+        }
+      });
+
+      if (error) throw error;
+
+      if (data.success) {
+        setDeploymentUrl(data.url);
+        setTerminalOutput(prev => [
+          ...prev, 
+          `✅ Deployed successfully!`,
+          `🔗 Your app is live at: ${data.url}`,
+          `📝 Site ID: ${data.siteId}`
+        ]);
+        
+        toast({
+          title: "Deployment Successful! 🎉",
+          description: (
+            <div className="flex flex-col gap-2">
+              <p>Your app is now live!</p>
+              <a 
+                href={data.url} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-cyan-400 hover:text-cyan-300 underline"
+              >
+                {data.url}
+              </a>
+            </div>
+          ),
+        });
+      } else {
+        throw new Error(data.error || 'Deployment failed');
+      }
+
+    } catch (error) {
+      console.error('Deployment error:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      setTerminalOutput(prev => [
+        ...prev, 
+        `❌ Deployment failed: ${errorMsg}`
+      ]);
+      
+      toast({
+        title: "Deployment Failed",
+        description: errorMsg,
+        variant: "destructive"
+      });
+    } finally {
+      setIsDeploying(false);
+    }
+  };
+
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [terminalOutput]);
@@ -565,9 +644,11 @@ export function WorkshopPage() {
                         <Github className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        className="px-2.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-black rounded-lg font-medium transition-all text-xs shadow-lg shadow-cyan-500/30"
+                        onClick={handlePublish}
+                        disabled={isDeploying || !previewCode}
+                        className="px-2.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-black rounded-lg font-medium transition-all text-xs shadow-lg shadow-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Publish
+                        {isDeploying ? 'Deploying...' : 'Publish'}
                       </button>
                     </div>
                   </div>
@@ -790,9 +871,11 @@ export function WorkshopPage() {
                           <Github className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          className="px-2.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-black rounded-lg font-medium transition-all text-xs shadow-lg shadow-cyan-500/30"
+                          onClick={handlePublish}
+                          disabled={isDeploying || !previewCode}
+                          className="px-2.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-black rounded-lg font-medium transition-all text-xs shadow-lg shadow-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          Publish
+                          {isDeploying ? 'Deploying...' : 'Publish'}
                         </button>
                       </>
                     )}

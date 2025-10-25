@@ -1,1 +1,7 @@
 project_id = "yyqchynosumtefzaqowr"
+
+[functions.ai-code-generator]
+verify_jwt = false
+
+[functions.deploy-to-netlify]
+verify_jwt = false
