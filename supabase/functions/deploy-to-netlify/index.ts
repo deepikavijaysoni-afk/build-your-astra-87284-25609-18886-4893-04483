@@ -1,79 +1,155 @@
-import "https://deno.land/x/xhr@0.1.0/mod.ts";
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { ZipWriter, BlobWriter } from "npm:@zip.js/zip.js@2.7.34";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
-serve(async (req) => {
-  // Handle CORS preflight requests
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 200,
+      headers: corsHeaders,
+    });
   }
 
   try {
     const { htmlContent, siteName } = await req.json();
 
     if (!htmlContent) {
-      throw new Error('HTML content is required');
+      throw new Error("HTML content is required");
     }
 
-    console.log('Deploying to Netlify:', { siteName });
+    console.log("Deploying to Netlify:", { siteName });
 
-    const netlifyToken = Deno.env.get('NETLIFY_ACCESS_TOKEN');
+    const netlifyToken = Deno.env.get("NETLIFY_ACCESS_TOKEN");
     if (!netlifyToken) {
-      throw new Error('Netlify access token not configured');
+      throw new Error("Netlify access token not configured. Please add your Netlify token to the environment variables.");
     }
 
-    // Create form data with HTML file
-    const formData = new FormData();
-    const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
-    formData.append('index.html', htmlBlob, 'index.html');
+    // Create ZIP file using zip.js
+    const blobWriter = new BlobWriter("application/zip");
+    const zipWriter = new ZipWriter(blobWriter);
+    
+    // Add index.html to the ZIP
+    await zipWriter.add(
+      "index.html",
+      new Response(htmlContent).body!.getReader()
+    );
+    
+    // Close the ZIP writer and get the blob
+    await zipWriter.close();
+    const zipBlob = await blobWriter.getData();
+    const zipArrayBuffer = await zipBlob.arrayBuffer();
 
-    // Deploy to Netlify using their drag and drop API
-    const response = await fetch('https://api.netlify.com/api/v1/sites', {
-      method: 'POST',
+    console.log("ZIP file created, size:", zipArrayBuffer.byteLength);
+
+    // Step 1: Create a new site on Netlify
+    const createSiteResponse = await fetch("https://api.netlify.com/api/v1/sites", {
+      method: "POST",
       headers: {
-        'Authorization': `Bearer ${netlifyToken}`,
+        "Authorization": `Bearer ${netlifyToken}`,
+        "Content-Type": "application/json",
       },
-      body: formData,
+      body: JSON.stringify({
+        name: siteName || `astra-app-${Date.now()}`,
+      }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Netlify API error:', errorText);
-      throw new Error(`Netlify deployment failed: ${response.status} ${errorText}`);
+    if (!createSiteResponse.ok) {
+      const errorText = await createSiteResponse.text();
+      console.error("Failed to create site:", errorText);
+      throw new Error(`Failed to create site: ${createSiteResponse.status} ${errorText}`);
     }
 
-    const result = await response.json();
-    const siteUrl = result.ssl_url || result.url;
+    const siteData = await createSiteResponse.json();
+    const siteId = siteData.id;
+    console.log("Site created:", siteId);
 
-    console.log('Deployment successful:', siteUrl);
+    // Step 2: Deploy the ZIP file to the site
+    const deployResponse = await fetch(`https://api.netlify.com/api/v1/sites/${siteId}/deploys`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${netlifyToken}`,
+        "Content-Type": "application/zip",
+      },
+      body: zipArrayBuffer,
+    });
+
+    if (!deployResponse.ok) {
+      const errorText = await deployResponse.text();
+      console.error("Failed to deploy:", errorText);
+      throw new Error(`Failed to deploy: ${deployResponse.status} ${errorText}`);
+    }
+
+    const deployData = await deployResponse.json();
+    console.log("Deploy initiated:", deployData.id);
+
+    // Step 3: Wait for deployment to be ready
+    let attempts = 0;
+    const maxAttempts = 30;
+    let deployStatus = deployData.state;
+
+    while (attempts < maxAttempts && deployStatus !== "ready") {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      
+      const statusResponse = await fetch(
+        `https://api.netlify.com/api/v1/sites/${siteId}/deploys/${deployData.id}`,
+        {
+          headers: {
+            "Authorization": `Bearer ${netlifyToken}`,
+          },
+        }
+      );
+
+      if (statusResponse.ok) {
+        const statusData = await statusResponse.json();
+        deployStatus = statusData.state;
+        console.log("Deploy status:", deployStatus);
+
+        if (deployStatus === "error") {
+          throw new Error("Deployment failed on Netlify");
+        }
+
+        if (deployStatus === "ready") {
+          break;
+        }
+      }
+
+      attempts++;
+    }
+
+    if (deployStatus !== "ready") {
+      throw new Error("Deployment timeout - site may still be deploying");
+    }
+
+    const siteUrl = siteData.ssl_url || siteData.url;
+    console.log("Deployment successful:", siteUrl);
 
     return new Response(
-      JSON.stringify({ 
-        success: true, 
+      JSON.stringify({
+        success: true,
         url: siteUrl,
-        siteId: result.id,
-        siteName: result.name
+        siteId: siteData.id,
+        siteName: siteData.name,
       }),
       {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
-
   } catch (error) {
-    console.error('Error in deploy-to-netlify function:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.error("Error in deploy-to-netlify function:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: errorMessage 
+      JSON.stringify({
+        success: false,
+        error: errorMessage,
       }),
       {
         status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
     );
   }
