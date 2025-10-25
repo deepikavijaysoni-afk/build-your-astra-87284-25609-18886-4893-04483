@@ -491,10 +491,20 @@ export function WorkshopPage() {
     }
 
     setIsDeploying(true);
-    setTerminalOutput(prev => [...prev, '🚀 Starting deployment to Netlify...']);
+    setActiveTab('code');
+    setCodeViewTab('terminal');
+    
+    setTerminalOutput(prev => [...prev, '']);
+    setTerminalOutput(prev => [...prev, '🚀 Initializing deployment...']);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    setTerminalOutput(prev => [...prev, '📦 Packaging application files...']);
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
+    setTerminalOutput(prev => [...prev, '☁️  Connecting to Netlify...']);
     
     toast({
-      title: "Deploying...",
+      title: "Publishing...",
       description: "Your app is being deployed to Netlify"
     });
 
@@ -512,13 +522,17 @@ export function WorkshopPage() {
         setDeploymentUrl(data.url);
         setTerminalOutput(prev => [
           ...prev, 
-          `✅ Deployed successfully!`,
-          `🔗 Your app is live at: ${data.url}`,
-          `📝 Site ID: ${data.siteId}`
+          '✅ Deployment completed successfully!',
+          '',
+          '🎉 Your app is now live!',
+          `🔗 URL: ${data.url}`,
+          `📝 Site ID: ${data.siteId}`,
+          '',
+          `Visit your app: ${data.url}`
         ]);
         
         toast({
-          title: "Deployment Successful! 🎉",
+          title: "Published Successfully! 🎉",
           description: (
             <div className="flex flex-col gap-2">
               <p>Your app is now live!</p>
@@ -526,7 +540,7 @@ export function WorkshopPage() {
                 href={data.url} 
                 target="_blank" 
                 rel="noopener noreferrer"
-                className="text-cyan-400 hover:text-cyan-300 underline"
+                className="text-cyan-400 hover:text-cyan-300 underline break-all"
               >
                 {data.url}
               </a>
@@ -542,7 +556,9 @@ export function WorkshopPage() {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       setTerminalOutput(prev => [
         ...prev, 
-        `❌ Deployment failed: ${errorMsg}`
+        '',
+        `❌ Deployment failed: ${errorMsg}`,
+        'Please try again or check your Netlify token configuration.'
       ]);
       
       toast({
@@ -975,9 +991,11 @@ export function WorkshopPage() {
                       <Github className="w-5 h-5" />
                     </button>
                     <button
-                      className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-black rounded-lg font-medium transition-all text-sm shadow-lg shadow-cyan-500/30"
+                      onClick={handlePublish}
+                      disabled={isDeploying || !previewCode}
+                      className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-black rounded-lg font-medium transition-all text-sm shadow-lg shadow-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Publish
+                      {isDeploying ? 'Publishing...' : 'Publish'}
                     </button>
                   </div>
                 </>
